@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghost-job-detector"
+version = "0.1.0"
+description = "Direct-ATS scraper, 3-tier deduplication pipeline, and explainable ghost-job detector"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Invincible1228", email = "kchirag1221@gmail.com" }
+]
+license = { text = "MIT" }
+keywords = ["ats", "scraping", "ghost-jobs", "deduplication", "nlp", "fastapi"]
+
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic>=2.6.0",
+    "rapidfuzz>=3.6.0",
+    "click>=8.1.0",
+    "rich>=13.7.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.3.0",
+]
+
+[project.scripts]
+ghostjob = "ghostjob.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
