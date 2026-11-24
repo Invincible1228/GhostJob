@@ -1,7 +1,7 @@
 # GhostJob: Direct-ATS Ingestion Pipeline & Explainable Ghost-Job Detection Engine
 
-[![CI Regression Suite](https://github.com/Invincible1228/ghost-job-detector/actions/workflows/ci.yml/badge.svg)](https://github.com/Invincible1228/ghost-job-detector/actions/workflows/ci.yml)
-[![Daily ATS Ingestion](https://github.com/Invincible1228/ghost-job-detector/actions/workflows/crawl.yml/badge.svg)](https://github.com/Invincible1228/ghost-job-detector/actions/workflows/crawl.yml)
+[![CI Regression Suite](https://github.com/Invincible1228/GhostJob/actions/workflows/ci.yml/badge.svg)](https://github.com/Invincible1228/GhostJob/actions/workflows/ci.yml)
+[![Daily ATS Ingestion](https://github.com/Invincible1228/GhostJob/actions/workflows/crawl.yml/badge.svg)](https://github.com/Invincible1228/GhostJob/actions/workflows/crawl.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -115,31 +115,35 @@ Most scrapers compound this noise by scraping job aggregators (LinkedIn, Indeed,
 ```mermaid
 flowchart TD
     subgraph INGESTION["1. Ingestion Plane (Direct-ATS)"]
-        SEEDS["Verified Seeds (37 Employers)\nGreenhouse / Lever / Ashby"] --> DISCO["CareerDiscoverer\nVendor & Slug Auto-Detection"]
-        DISCO --> POOL["CrawlerEngine\nAsync HTTP Pool (httpx)"]
-        POOL -->|GET /boards/{slug}/jobs| GH["Greenhouse Adapter"]
-        POOL -->|GET /v0/postings/{slug}| LEV["Lever Adapter"]
-        POOL -->|POST /posting-api/job-board| ASH["Ashby Adapter"]
+        SEEDS["Verified Seeds (37 Employers)<br/>Greenhouse / Lever / Ashby"] --> DISCO["CareerDiscoverer<br/>Vendor & Slug Auto-Detection"]
+        DISCO --> POOL["CrawlerEngine<br/>Async HTTP Pool (httpx)"]
+        POOL -->|"GET /boards/:slug/jobs"| GH["Greenhouse Adapter"]
+        POOL -->|"GET /v0/postings/:slug"| LEV["Lever Adapter"]
+        POOL -->|"POST /posting-api/job-board"| ASH["Ashby Adapter"]
     end
 
     subgraph STORAGE["2. Storage Plane (SQLite WAL)"]
-        GH & LEV & ASH --> STAGE1[("Stage 1 — Raw Snapshot Store\njob_snapshots (Immutable JSON)")]
+        STAGE1[("Stage 1 — Raw Snapshot Store<br/>job_snapshots (Immutable JSON)")]
+        STAGE2[("Stage 2 — Canonical Entity Store<br/>canonical_jobs (Unified Schema)")]
+        STAGE3[("Stage 3 — Scored Risk Store<br/>ghost_scores (Probabilities + Rationale)")]
     end
+
+    GH & LEV & ASH --> STAGE1
 
     subgraph PROCESSING["3. Processing & Deduplication Plane"]
         STAGE1 --> PIPELINE["DeduplicationPipeline"]
-        PIPELINE --> TIER1{"Tier 1:\nExact Hash / Ext ID"}
+        PIPELINE --> TIER1{"Tier 1:<br/>Exact Hash / Ext ID"}
         TIER1 -->|Match| STAGE2
-        TIER1 -->|No Match| TIER2{"Tier 2:\nRapidFuzz Title + City Alias"}
+        TIER1 -->|No Match| TIER2{"Tier 2:<br/>RapidFuzz Title + City Alias"}
         TIER2 -->|Match| STAGE2
-        TIER2 -->|No Match| TIER3{"Tier 3:\nTF-IDF Cosine + Role Guards"}
-        TIER3 -->|Match / New| STAGE2[("Stage 2 — Canonical Entity Store\ncanonical_jobs (Unified Schema)")]
+        TIER2 -->|No Match| TIER3{"Tier 3:<br/>TF-IDF Cosine + Role Guards"}
+        TIER3 -->|Match or New| STAGE2
     end
 
     subgraph SCORING["4. Scoring & Inference Plane"]
-        STAGE2 --> EXTRACTOR["Feature Extractor\nAge, Clones, Evergreen, Salary"]
-        EXTRACTOR --> SCORER["GhostScorerEngine\nCalibrated Heuristic Formulations"]
-        SCORER --> STAGE3[("Stage 3 — Scored Risk Store\nghost_scores (Probabilities + Rationale)")]
+        STAGE2 --> EXTRACTOR["Feature Extractor<br/>Age, Clones, Evergreen, Salary"]
+        EXTRACTOR --> SCORER["GhostScorerEngine<br/>Calibrated Heuristic Formulations"]
+        SCORER --> STAGE3
     end
 
     subgraph PRESENTATION["5. Delivery & Operations Plane"]
@@ -147,7 +151,7 @@ flowchart TD
         STAGE3 --> REST["FastAPI Service (app.py)"]
         STAGE3 --> UI["Interactive Dashboard (HTML/Tailwind)"]
         STAGE3 --> EXPORT["Bulk Exports (CSV & JSON)"]
-        CRON[".github/workflows/crawl.yml\nDaily 04:00 UTC Refresh"] -.-> POOL
+        CRON[".github/workflows/crawl.yml<br/>Daily 04:00 UTC Refresh"] -.-> POOL
     end
 ```
 
@@ -179,7 +183,9 @@ The system is organized into five decoupled planes:
 
 Each ingested job snapshot $f$ tracks two independent temporal horizons:
 
-$$\text{Temporal Coordinates}(f) = \big(e_f,\ o_f\big)$$
+$$
+\text{Temporal Coordinates}(f) = \big(e_f,\ o_f\big)
+$$
 
 1. **Event Time ($e_f$):** The claimed publication timestamp provided natively in ATS vendor payloads:
    - **Lever:** `createdAt` integer millisecond timestamp.
@@ -190,7 +196,9 @@ $$\text{Temporal Coordinates}(f) = \big(e_f,\ o_f\big)$$
 **Requisition Age Formulation:**
 Rather than relying on crawler arrival time, the true requisition age $A_i$ (in days) is calculated as:
 
-$$A_i = \max\left(0,\ \frac{\text{now}_{\text{UTC}} - \min(e_f,\ o_f)}{86400}\right)$$
+$$
+A_i = \max\left(0,\ \frac{\text{now}_{\text{UTC}} - \min(e_f,\ o_f)}{86400}\right)
+$$
 
 This mathematical formulation prevents day-1 crawlers from mistakenly reporting a 120-day-old stale posting as "freshly posted today."
 
@@ -253,7 +261,15 @@ CREATE TABLE ghost_scores (
 ### 6.1 The Boilerplate Problem in Dense Embeddings
 
 Modern corporate job descriptions are heavily dominated by non-functional boilerplate:
-$$\text{Total JD Content} = \underbrace{\text{Role Responsibilities + Tech Stack}}_{20-30\%} + \underbrace{\text{Company Pitch + Benefits + Equal Opportunity Disclosures}}_{70-80\%}$$
+
+| Component | Content Type | Proportion | Impact on Dense Embeddings |
+|---|---|---|---|
+| **Role Specifications** | Responsibilities, Qualifications & Tech Stack | **20–30%** | Distinguishes distinct technical roles |
+| **Shared Boilerplate** | Company Mission, Perks, Culture & EEO Disclosures | **70–80%** | Induces false cosine similarity $> 0.85$ |
+
+$$
+\text{Total JD Content} = \text{Role Specifications (20–30\%)} + \text{Shared Corporate Boilerplate (70–80\%)}
+$$
 
 When applying standard sentence transformers (e.g., `all-MiniLM-L6-v2`, `bge-small`) to entire job postings, the high-dimensional cosine similarity between two postings at the same company routinely exceeds $0.85$, even when comparing completely orthogonal roles such as **"Staff Infrastructure Engineer"** and **"Senior Product Designer"**.
 
@@ -265,18 +281,22 @@ To guarantee high precision without dense embedding overhead, `GhostJob` routes 
 
 ```mermaid
 flowchart LR
-    IN[Incoming Snapshot] --> T1{Tier 1: Exact Hash\nSHA-256 / Ext ID}
-    T1 -->|Match Found| MERGE1[Merge Location & Bump Clone Count]
-    T1 -->|No Match| T2{Tier 2: RapidFuzz\nToken Sort Ratio >= 88}
-    T2 -->|Match Found| MERGE2[Merge Alias & Canonize City]
-    T2 -->|No Match| T3{Tier 3: Domain Cosine\nTF-IDF >= 0.50 + Guards}
-    T3 -->|Guard Passed| MERGE3[Merge Canonical Entity]
-    T3 -->|Guard Failed / No Match| NEW[Create New Canonical Role]
+    IN["Incoming Snapshot"] --> T1{"Tier 1: Exact Hash<br/>SHA-256 / Ext ID"}
+    T1 -->|Match Found| MERGE1["Merge Location & Bump Clone Count"]
+    T1 -->|No Match| T2{"Tier 2: RapidFuzz<br/>Token Sort Ratio >= 88"}
+    T2 -->|Match Found| MERGE2["Merge Alias & Canonize City"]
+    T2 -->|No Match| T3{"Tier 3: Domain Cosine<br/>TF-IDF >= 0.50 + Guards"}
+    T3 -->|Guard Passed| MERGE3["Merge Canonical Entity"]
+    T3 -->|Guard Failed / No Match| NEW["Create New Canonical Role"]
 ```
 
 1. **Tier 1 — Exact Match ($O(1)$ Complexity):**
    Matches identical external ATS requisition IDs or exact SHA-256 fingerprints of normalized text:
-   $$\text{Fingerprint} = \text{SHA256}(\text{norm}(title) \parallel \text{norm}(location) \parallel \text{norm}(description))$$
+
+   $$
+   \text{Fingerprint} = \text{SHA256}(\text{norm}(title) \parallel \text{norm}(location) \parallel \text{norm}(description))
+   $$
+
 2. **Tier 2 — RapidFuzz Fuzzy Token Match ($\ge 88.0$):**
    Evaluates normalized titles within the same company using token-sort ratio, ensuring word order variations (*"Software Engineer II - Backend"* vs *"Backend Software Engineer, L2"*) resolve identically.
 3. **Tier 3 — Domain-Aware Token Cosine + Role Guards:**
@@ -298,21 +318,23 @@ NORM_PATTERNS = [
 
 **Metropolitan Regional Aliasing:**
 To accurately measure multi-city cloning across India and global hubs, regional abbreviations are mapped to unified geographic nodes:
-- `{"bangalore", "blr", "bengaluru"} \rightarrow \text{"bengaluru"}`
-- `{"gurgaon", "gurugram", "delhi ncr", "noida"} \rightarrow \text{"delhi_ncr"}`
-- `{"sf", "san francisco", "bay area", "sunnyvale"} \rightarrow \text{"san_francisco"}`
+- `{"bangalore", "blr", "bengaluru"}` $\rightarrow$ `"bengaluru"`
+- `{"gurgaon", "gurugram", "delhi ncr", "noida"}` $\rightarrow$ `"delhi_ncr"`
+- `{"sf", "san francisco", "bay area", "sunnyvale"}` $\rightarrow$ `"san_francisco"`
 
 ### 6.4 Role-Disjointness Matrix & Invariant Guards
 
 If a candidate pair triggers Tier 3 similarity, it must pass the **Role-Disjointness Guard Matrix** ($\mathcal{D}$). If any mutually exclusive pair is detected, matching is strictly aborted:
 
-$$\mathcal{D} = \begin{pmatrix}
+$$
+\mathcal{D} = \begin{pmatrix}
 \text{frontend} & \text{backend} \\
 \text{ios} & \text{android} \\
 \text{staff} & \text{intern} \\
 \text{manager} & \text{designer} \\
 \text{data engineer} & \text{data analyst}
-\end{pmatrix}$$
+\end{pmatrix}
+$$
 
 This deterministic guard guarantees **0.0% false-positive merges** across distinct technical specializations, regardless of shared corporate text.
 
@@ -336,28 +358,42 @@ The scoring engine evaluates five orthogonal risk signals extracted from each ca
 
 The composite ghost probability $P(\text{Ghost} \mid X)$ is computed as a weighted linear combination bounded in $[0.0, 1.0]$:
 
-$$P(\text{Ghost} \mid X) = \sum_{k=1}^5 w_k \cdot \phi_k(X)$$
+$$
+P(\text{Ghost} \mid X) = \sum_{k=1}^5 w_k \cdot \phi_k(X)
+$$
 
 Where the transfer functions $\phi_k(X)$ are defined as:
 
-$$\phi_{\text{age}}(A_i) = \min\left(1.0,\ \frac{\max(0,\ A_i - 40)}{140}\right)$$
+$$
+\phi_{\text{age}}(A_i) = \min\left(1.0,\ \frac{\max(0,\ A_i - 40)}{140}\right)
+$$
 
-$$\phi_{\text{repost}} = \mathbb{1}[\text{repost\_detected} = \text{True}]$$
+$$
+\phi_{\text{repost}} = \mathbb{1}[\text{repost detected} = \text{True}]
+$$
 
-$$\phi_{\text{evergreen}} = \mathbb{1}[\text{title} \in \text{Evergreen Regex}]$$
+$$
+\phi_{\text{evergreen}} = \mathbb{1}[\text{title} \in \text{Evergreen Regex}]
+$$
 
-$$\phi_{\text{clone}}(C_i) = \min\left(1.0,\ \frac{\max(0,\ C_i - 2)}{5}\right)$$
+$$
+\phi_{\text{clone}}(C_i) = \min\left(1.0,\ \frac{\max(0,\ C_i - 2)}{5}\right)
+$$
 
-$$\phi_{\text{salary}} = \mathbb{1}[\text{salary\_listed} = \text{False}]$$
+$$
+\phi_{\text{salary}} = \mathbb{1}[\text{salary listed} = \text{False}]
+$$
 
 **Calibrated Risk Classification Thresholds:**
 
-$$\text{Risk Tier}(P, X) = \begin{cases}
-\textbf{Zombie} & P \ge 0.70 \text{ and } \text{staleness} > 180\text{d with clones/evergreen/reposts} \\
-\textbf{Likely Ghost} & P \ge 0.70 \\
-\textbf{Aging} & 0.35 \le P < 0.70 \\
-\textbf{Active} & P < 0.35
-\end{cases}$$
+$$
+\text{Risk Tier}(P, X) = \begin{cases}
+\text{Zombie} & P \ge 0.70 \text{ and staleness} > 180\text{d with clones/evergreen/reposts} \\
+\text{Likely Ghost} & P \ge 0.70 \\
+\text{Aging} & 0.35 \le P < 0.70 \\
+\text{Active} & P < 0.35
+\end{cases}
+$$
 
 ### 7.3 Decoupling Spatial Clones from Temporal Loops
 
@@ -428,7 +464,9 @@ To prevent self-fulfilling synthetic evaluations, we sampled **125 candidate pai
 |:---:|:---:|:---:|:---:|:---:|
 | **125 Real Pairs** | **60** | **8** | **57** | **0** |
 
-$$\text{Precision} = \frac{60}{60 + 8} = \mathbf{88.24\%}, \quad \text{Recall} = \frac{60}{60 + 0} = \mathbf{100.0\%}, \quad \text{F1-Score} = \mathbf{93.75\%}$$
+$$
+\text{Precision} = \frac{60}{60 + 8} = 88.24\%, \quad \text{Recall} = \frac{60}{60 + 0} = 100.0\%, \quad \text{F1-Score} = 93.75\%
+$$
 
 **Tier Contribution Breakdown:**
 - **Tier 1 [EXACT]:** **28 matches** (exact external ID or cryptographic content hash match)
@@ -474,7 +512,7 @@ To verify scoring separability, a controlled sensitivity stress-test was conduct
 ### 9.2 Repository Layout
 
 ```text
-ghost-job-detector/
+GhostJob/
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml                   # Automated pytest regression suite
@@ -527,8 +565,8 @@ ghost-job-detector/
 
 ```bash
 # Clone the repository
-git clone https://github.com/Invincible1228/ghost-job-detector.git
-cd ghost-job-detector
+git clone https://github.com/Invincible1228/GhostJob.git
+cd GhostJob
 
 # Create and activate virtual environment
 python -m venv .venv

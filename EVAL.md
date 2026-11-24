@@ -18,13 +18,21 @@ This document provides formal empirical evaluations of the **Ghost-Job Detector 
 
 ### Verified Evaluation Metrics:
 
-$$\text{Precision} = \frac{TP}{TP + FP} = \frac{60}{60 + 8} = \mathbf{88.24\%}$$
+$$
+\text{Precision} = \frac{TP}{TP + FP} = \frac{60}{60 + 8} = 88.24\%
+$$
 
-$$\text{Recall} = \frac{TP}{TP + FN} = \frac{60}{60 + 0} = \mathbf{100.0\%}$$
+$$
+\text{Recall} = \frac{TP}{TP + FN} = \frac{60}{60 + 0} = 100.0\%
+$$
 
-$$\text{F1-Score} = 2 \cdot \frac{\text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}} = \mathbf{93.75\%}$$
+$$
+\text{F1-Score} = 2 \cdot \frac{\text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}} = 93.75\%
+$$
 
-$$\text{Accuracy} = \frac{TP + TN}{\text{Total}} = \frac{60 + 57}{125} = \mathbf{93.60\%}$$
+$$
+\text{Accuracy} = \frac{TP + TN}{\text{Total}} = \frac{60 + 57}{125} = 93.60\%
+$$
 
 * **Tier Contributions:** Matches distributed across all three tiers: **Tier 1 (Exact Hash/ID): 28 matches**, **Tier 2 (Fuzzy Title/City): 18 matches**, **Tier 3 (Semantic Cosine): 14 matches** (Total: 60 matches).
 * **Error Analysis:** The 8 false positives arose from sub-specialization titles within the same department that shared heavy term overlap before reaching the role-disjointness filters. This authentic 88.2% precision reflects real-world production performance rather than synthetic overfitting.
